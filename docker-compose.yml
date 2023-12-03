@@ -1,0 +1,106 @@
+version: '3.7'
+services:
+  nginxproxy:
+    image: nginxproxy/nginx-proxy
+    container_name: nginxproxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - html:/usr/share/nginx/html
+      - dhparam:/etc/nginx/dhparam
+      - vhost:/etc/nginx/vhost.d
+      - certs:/etc/nginx/certs:ro
+      - acme:/etc/acme.sh
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./client_max_upload_size.conf:/etc/nginx/conf.d/client_max_upload_size.conf
+      - ./www.example.com:/etc/nginx/vhost.d/www.example.com
+    labels:
+      - "com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy"
+    restart: always
+    networks:
+      multiwp:
+        ipv4_address: 172.18.0.10
+
+  letsencryptbot:
+    image: nginxproxy/acme-companion
+    container_name: letsencryptbot
+    depends_on:
+      - "nginxproxy"
+    volumes:
+      - certs:/etc/nginx/certs:rw
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - acme:/etc/acme.sh
+    environment:
+      DEFAULT_EMAIL: youremailhere@someemail.com
+    restart: always
+    networks:
+      multiwp:
+        ipv4_address: 172.18.0.11
+
+  mariadb:
+    image: multidb:10.11
+    build:
+      dockerfile: ./containerfiles/dbcontainerfile
+    container_name: mariadb
+    environment:
+      MYSQL_DATABASE: wordpressdb
+      MYSQL_USER: dbuser
+      MYSQL_PASSWORD: passw0rd
+      MYSQL_ROOT_PASSWORD: passw0rd
+    volumes:
+      - mariadbvol:/var/lib/mysql
+    restart: always
+    networks:
+      dbnet:
+        ipv4_address: 192.168.191.10
+
+  wordpress:
+    image: wordpress
+    build:
+      dockerfile: ./containerfiles/wpcontainerfile
+    container_name: wordpress
+    environment:
+      WORDPRESS_DB_HOST: mariadb
+      WORDPRESS_DB_USER: dbuser
+      WORDPRESS_DB_PASSWORD: passw0rd
+      WORDPRESS_DB_NAME: wordpressdb
+      WORDPRESS_CONFIG_EXTRA: |
+        define('AUTOMATIC_UPDATER_DISABLED', true);
+      VIRTUAL_HOST: example.com,www.example.com
+      LETSENCRYPT_HOST: example.com,www.example.com
+    volumes:
+      - wordpressvol:/var/www/html/wp-content
+      - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+    restart: always
+    depends_on:
+      - mariadb
+    networks:
+      dbnet:
+        ipv4_address: 192.168.191.20
+      multiwp:
+        ipv4_address: 172.18.0.13
+
+volumes:
+  certs:
+  html:
+  vhost:
+  acme:
+  dhparam:
+  mariadbvol:
+  wordpressvol:
+  
+networks:
+  dbnet:
+    internal: true
+    ipam:
+      config:
+        - subnet: 192.168.191.0/24
+  multiwp:
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+ 
